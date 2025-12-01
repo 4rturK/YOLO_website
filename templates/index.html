@@ -19,12 +19,38 @@
         <button class="btn btn-warning w-100">Wyślij zdjęcie</button>
     </form>
 
-    {% if uploaded_image %}
-    <div class="mt-4 text-center card p-3 bg-secondary">
-        <h4>Przesłane zdjęcie:</h4>
-        <img src="/{{ uploaded_image }}" class="img-fluid mt-3 border border-light">
+    {% if processed_image %}
+    <div class="results-container">
+        <!-- Sekcja ze zdjęciem -->
+        <div class="image-box">
+            <h3>Wynik analizy:</h3>
+            <!-- KLUCZOWA ZMIANA: Użycie url_for('uploaded_file', ...) -->
+            <img src="{{ url_for('uploaded_file', filename=processed_image) }}" alt="Przetworzone zdjęcie">
+            
+            <br><br>
+            <small>Oryginał:</small><br>
+            <img src="{{ url_for('uploaded_file', filename=uploaded_image) }}" alt="Oryginał">
+        </div>
+
+        <!-- Sekcja z listą wykrytych obiektów -->
+        <div class="info-box">
+            <h3>Wykryte obiekty ({{ detections|length }}):</h3>
+            {% if detections %}
+                <div style="max-height: 400px; overflow-y: auto;">
+                    {% for item in detections %}
+                    <div class="detection-item">
+                        <span class="badge">{{ item.name }}</span>
+                        <span class="confidence">{{ item.confidence }}%</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p>Nie wykryto żadnych obiektów.</p>
+            {% endif %}
+        </div>
     </div>
     {% endif %}
+
 
 </div>
 
