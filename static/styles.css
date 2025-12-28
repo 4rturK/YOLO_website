@@ -1,6 +1,53 @@
-body {
-    font-family: Arial, sans-serif;
+/* Główne kontenery */
+.image-wrapper {
+    background-color: #1a1a1a;
+    padding: 10px;
+    border-radius: 8px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
-.card {
+
+.img-fluid {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Wyszukiwarka klas */
+#classSearch {
+    background-color: #212529;
+    color: white;
+    border: 1px solid #6c757d;
+}
+
+/* Styl listy wyboru klas */
+.form-check-label {
+    color: #e0e0e0;
+    cursor: pointer;
+}
+
+.form-check-input:checked {
+    background-color: #ffc107;
+    border-color: #ffc107;
+}
+
+/* Plakietki detekcji pod zdjęciami */
+.detection-badge {
+    border: 1px solid #444;
+}
+
+.confidence-text {
+    color: #ffffff; /* Jasne cyfry */
+    font-weight: bold;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.9rem;
+}
+
+/* Scrollbar dla listy klas */
+#classListContainer::-webkit-scrollbar {
+    width: 6px;
+}
+#classListContainer::-webkit-scrollbar-thumb {
+    background: #ffc107;
     border-radius: 10px;
 }
