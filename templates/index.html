@@ -3,17 +3,47 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YOLO WebApp — Wyniki Detekcji</title>
+    <title>YOLO WebApp — Interaktywna Detekcja</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <style>
         .category-header { cursor: pointer; user-select: none; }
         .category-header:hover { color: #ffc107 !important; }
-        .zoomable { cursor: zoom-in; transition: transform 0.3s; }
-        .zoomable:hover { transform: scale(1.02); }
         .hidden-view { display: none; }
         .table-dark { background-color: #212529; }
         #classListContainer { scrollbar-width: thin; scrollbar-color: #ffc107 #212529; }
+        
+        /* Styl kontenera obrazu i ramek */
+        .detection-container {
+            position: relative;
+            display: inline-block;
+            width: 100%;
+            max-width: 800px;
+        }
+        .detection-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Pozwala klikać "przez" ramki */
+        }
+        .bbox {
+            position: absolute;
+            border: 2px solid #ffc107;
+            box-shadow: 0 0 5px rgba(0,0,0,0.5);
+        }
+        .bbox-label {
+            position: absolute;
+            top: -22px;
+            left: -2px;
+            background: #ffc107;
+            color: #000;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 1px 4px;
+            white-space: nowrap;
+        }
     </style>
 </head>
 
@@ -22,25 +52,35 @@
 <div class="container py-5">
     <h1 class="text-center mb-4">Detekcja Obiektów YOLOv8</h1>
 
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert alert-danger alert-dismissible fade show">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
     <form method="POST" enctype="multipart/form-data" class="card p-4 bg-secondary text-light shadow mb-5">
         <div class="mb-4">
             <label class="form-label fw-bold text-warning">1. Wybierz zdjęcie:</label>
-            <input type="file" name="image" accept="image/*" class="form-control" required>
+            <input type="file" name="image" accept="image/*,video/*" class="form-control" required>
         </div>
 
         <div class="mb-3">
             <div class="d-flex justify-content-between align-items-end mb-2">
-                <label class="form-label fw-bold text-warning m-0">2. Filtr obiektów:</label>
+                <label class="form-label fw-bold text-warning m-0">2. Filtr obiektów (klasy):</label>
                 <div class="btn-group">
                     <button type="button" class="btn btn-sm btn-outline-warning active" id="btnCat" onclick="switchView('cat')">Kategorie</button>
                     <button type="button" class="btn btn-sm btn-outline-warning" id="btnAlpha" onclick="switchView('alpha')">Alfabet</button>
                 </div>
             </div>
 
-            <input type="text" id="classSearch" class="form-control form-control-sm mb-2 bg-dark text-white" placeholder="Szukaj...">
+            <input type="text" id="classSearch" class="form-control form-control-sm mb-2 bg-dark text-white" placeholder="Szukaj klasy...">
             
             <div id="classListContainer" class="bg-dark p-3 rounded border border-secondary" style="max-height: 180px; overflow-y: auto;">
-                
                 <div id="viewCategorized">
                     {% for cat_name, ids in categories.items() %}
                     <div class="category-group mb-3">
@@ -57,25 +97,6 @@
                         </div>
                     </div>
                     {% endfor %}
-
-                    <div class="category-group">
-                        <h6 class="text-muted border-bottom border-secondary pb-1">📦 Inne</h6>
-                        <div class="row row-cols-2 row-cols-md-4 row-cols-lg-6 g-2">
-                            {% for id, name in all_classes.items() %}
-                                {% set id_int = id|int %}
-                                {% set is_assigned = [false] %}
-                                {% for c_name, c_ids in categories.items() %}{% if id_int in c_ids %}{% if is_assigned.append(true) %}{% endif %}{% endif %}{% endfor %}
-                                {% if not is_assigned[-1] %}
-                                <div class="col class-item" data-name="{{ name }}">
-                                    <div class="form-check">
-                                        <input class="form-check-input sync-check" type="checkbox" name="classes" value="{{ id }}" id="cls_other_{{ id }}" onchange="syncCheckboxes(this)">
-                                        <label class="form-check-label small" for="cls_other_{{ id }}">{{ name }}</label>
-                                    </div>
-                                </div>
-                                {% endif %}
-                            {% endfor %}
-                        </div>
-                    </div>
                 </div>
 
                 <div id="viewAlphabetical" class="hidden-view">
@@ -95,40 +116,45 @@
         <button class="btn btn-warning btn-lg w-100 fw-bold">ANALIZUJ</button>
     </form>
 
-    {% if processed_image %}
+    {% if uploaded_image %}
     <div class="row mb-5">
-        <div class="col-md-6 text-center">
-            <h5 class="text-warning">Oryginał</h5>
-            <img src="{{ url_for('uploaded_file', filename=uploaded_image) }}" class="img-fluid rounded zoomable border border-secondary" onclick="openModal(this.src)">
-        </div>
-        <div class="col-md-6 text-center">
-            <h5 class="text-warning">Wynik YOLO</h5>
-            <img src="{{ url_for('uploaded_file', filename=processed_image) }}" class="img-fluid rounded zoomable border border-warning" onclick="openModal(this.src)">
+        <div class="col-12 text-center">
+            <h5 class="text-warning mb-3">Wynik Detekcji (Interaktywny)</h5>
+            <div class="detection-container mx-auto">
+                <img src="{{ url_for('uploaded_file', filename=uploaded_image) }}" id="mainImage" class="img-fluid rounded border border-secondary">
+                <div id="detectionOverlay" class="detection-overlay"></div>
+            </div>
         </div>
     </div>
 
     <div class="card bg-secondary p-4 shadow">
-        <h4 class="mb-4 text-warning border-bottom border-warning pb-2">📋 Lista wykrytych obiektów ({{ detections|length }})</h4>
-        {% if detections %}
+        <div class="row align-items-center mb-4">
+            <div class="col-md-6">
+                <h4 class="text-warning m-0">📋 Wykryte obiekty</h4>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label text-warning fw-bold">Minimalna pewność: <span id="confVal">25</span>%</label>
+                <input type="range" class="form-range" id="confSlider" min="0" max="100" value="25">
+            </div>
+        </div>
+
         <div class="table-responsive">
-            <table class="table table-dark table-striped table-hover align-middle">
+            <table class="table table-dark table-striped table-hover align-middle" id="resultsTable">
                 <thead>
                     <tr>
                         <th scope="col">#</th>
                         <th scope="col">Nazwa obiektu</th>
-                        <th scope="col">Pewność (Confidence)</th>
+                        <th scope="col">Pewność</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for item in detections %}
-                    <tr>
+                    <tr class="detection-row" data-conf="{{ item.confidence }}">
                         <th scope="row">{{ loop.index }}</th>
                         <td class="text-capitalize fw-bold text-warning">{{ item.name }}</td>
                         <td>
                             <div class="progress bg-dark" style="height: 20px;">
-                                <div class="progress-bar bg-warning text-dark fw-bold" role="progressbar" 
-                                     style="width: {{ item.confidence }}%;" 
-                                     aria-valuenow="{{ item.confidence }}" aria-valuemin="0" aria-valuemax="100">
+                                <div class="progress-bar bg-warning text-dark fw-bold" style="width: {{ item.confidence }}%;">
                                     {{ item.confidence }}%
                                 </div>
                             </div>
@@ -137,44 +163,114 @@
                     {% endfor %}
                 </tbody>
             </table>
+            {% if not detections %}
+                <div class="alert alert-info bg-dark text-info border-info">Brak wykrytych obiektów dla wybranych klas.</div>
+            {% endif %}
         </div>
-        {% else %}
-        <div class="alert alert-info bg-dark text-info border-info">Brak wykrytych obiektów.</div>
-        {% endif %}
     </div>
     {% endif %}
 </div>
 
-<div class="modal fade" id="imageModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-centered">
-        <div class="modal-content bg-transparent border-0 text-center">
-            <img src="" id="modalImg" class="img-fluid rounded shadow-lg">
-            <button type="button" class="btn btn-warning mt-3 w-25 mx-auto" data-bs-dismiss="modal">Zamknij</button>
-        </div>
-    </div>
-</div>
-
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    // Dane przesłane z backendu
+    const detections = {{ detections|tojson if detections else '[]' }};
+
+    // 1. Zarządzanie widokiem klas (Kategorie / Alfabet)
     function switchView(mode) {
         document.getElementById('viewCategorized').classList.toggle('hidden-view', mode !== 'cat');
         document.getElementById('viewAlphabetical').classList.toggle('hidden-view', mode !== 'alpha');
         document.getElementById('btnCat').classList.toggle('active', mode === 'cat');
         document.getElementById('btnAlpha').classList.toggle('active', mode === 'alpha');
     }
+
     function syncCheckboxes(src) {
         document.querySelectorAll(`.sync-check[value="${src.value}"]`).forEach(cb => cb.checked = src.checked);
     }
+
     function toggleCategory(cat) {
         const checks = document.querySelector(`.category-items[data-cat="${cat}"]`).querySelectorAll('.sync-check');
         const allChecked = Array.from(checks).every(c => c.checked);
         checks.forEach(c => { c.checked = !allChecked; syncCheckboxes(c); });
     }
-    function openModal(src) { document.getElementById('modalImg').src = src; new bootstrap.Modal(document.getElementById('imageModal')).show(); }
-    document.getElementById('classSearch').addEventListener('input', function() {
-        let f = this.value.toLowerCase();
-        document.querySelectorAll('.class-item').forEach(i => i.style.display = i.getAttribute('data-name').toLowerCase().includes(f) ? "block" : "none");
-    });
+
+    // 2. Generowanie kolorów na podstawie ID klasy (Golden Angle)
+    function getColor(classId) {
+        const hue = (classId * 137.5) % 360; // Zapewnia rozpiętość barw
+        return `hsl(${hue}, 75%, 50%)`;
+    }
+
+    // 3. Dynamiczne filtrowanie i renderowanie
+    const slider = document.getElementById('confSlider');
+    const confLabel = document.getElementById('confVal');
+    const overlay = document.getElementById('detectionOverlay');
+    const rows = document.querySelectorAll('.detection-row');
+
+    function updateFilters() {
+        if (!slider) return;
+        
+        const minConf = parseInt(slider.value);
+        confLabel.innerText = minConf;
+        overlay.innerHTML = ''; // Czyścimy stare ramki
+
+        detections.forEach((det, index) => {
+            const isVisible = det.confidence >= minConf;
+            const color = getColor(det.class_id);
+            
+            // Filtrowanie i kolorowanie tabeli
+            if(rows[index]) {
+                rows[index].style.display = isVisible ? '' : 'none';
+                // Kolorujemy tekst nazwy i pasek postępu pod kolor ramki
+                rows[index].querySelector('.text-warning').style.color = color;
+                rows[index].querySelector('.progress-bar').style.backgroundColor = color;
+
+                // Interakcja: Podświetlanie po najechaniu na wiersz
+                rows[index].onmouseenter = () => {
+                    const box = document.getElementById(`bbox-${index}`);
+                    if(box) box.style.boxShadow = `0 0 15px ${color}, 0 0 5px white`;
+                };
+                rows[index].onmouseleave = () => {
+                    const box = document.getElementById(`bbox-${index}`);
+                    if(box) box.style.boxShadow = '0 0 5px rgba(0,0,0,0.5)';
+                };
+            }
+
+            // Rysowanie ramek
+            if(isVisible && det.box) {
+                const [x1, y1, x2, y2] = det.box;
+                const bbox = document.createElement('div');
+                bbox.className = 'bbox';
+                bbox.id = `bbox-${index}`;
+                bbox.style.borderColor = color;
+                bbox.style.left = (x1 * 100) + '%';
+                bbox.style.top = (y1 * 100) + '%';
+                bbox.style.width = ((x2 - x1) * 100) + '%';
+                bbox.style.height = ((y2 - y1) * 100) + '%';
+                
+                bbox.innerHTML = `<div class="bbox-label" style="background-color: ${color};">${det.name} ${det.confidence}%</div>`;
+                overlay.appendChild(bbox);
+            }
+        });
+    }
+
+    // Event Listenery
+    if(slider) {
+        slider.addEventListener('input', updateFilters);
+        window.addEventListener('load', updateFilters);
+        window.addEventListener('resize', updateFilters);
+    }
+
+    // Wyszukiwarka klas
+    const searchInput = document.getElementById('classSearch');
+    if(searchInput) {
+        searchInput.addEventListener('input', function() {
+            let f = this.value.toLowerCase();
+            document.querySelectorAll('.class-item').forEach(i => {
+                i.style.display = i.getAttribute('data-name').toLowerCase().includes(f) ? "block" : "none";
+            });
+        });
+    }
 </script>
+
 </body>
 </html>

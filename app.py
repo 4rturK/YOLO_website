@@ -3,9 +3,16 @@ import os
 from PIL import Image
 from ultralytics import YOLO
 import uuid
+from flask import Flask, render_template, request, send_from_directory, flash, redirect, url_for
+
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'avi', 'mov'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 app = Flask(__name__)
 
+app.secret_key = 'Coockies_key'
 # Konfiguracja folderów
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -36,35 +43,35 @@ def index():
 
     if request.method == 'POST':
         file = request.files.get('image')
-        # Pobieramy wybrane ID klas z checkboxów
+
+        if not file or file.filename == '':
+            flash('Błąd: Nie wybrano pliku!')
+            return redirect(url_for('index'))
+
+        if not allowed_file(file.filename):
+            flash(f'Błąd: Niedozwolony format pliku! Dozwolone to: {", ".join(ALLOWED_EXTENSIONS)}')
+            return redirect(url_for('index'))
         selected_class_ids = request.form.getlist('classes')
 
         if file and file.filename != '':
-            # Generowanie unikalnej nazwy pliku
             unique_filename = f"{uuid.uuid4().hex}_{file.filename}"
             img_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
             file.save(img_path)
             uploaded_image = unique_filename
 
-            # Konwersja wybranych klas na listę intów
             classes_to_detect = [int(cls_id) for cls_id in selected_class_ids] if selected_class_ids else None
 
-            # Analiza YOLO
-            # Filtr 'classes' przyjmuje listę ID (np. [0, 1, 2])
             results = model(img_path, conf=0.25, classes=classes_to_detect) 
-
             result = results[0]
 
-            # Generowanie obrazu z ramkami
             im_array = result.plot() 
-            im = Image.fromarray(im_array[..., ::-1]) # Konwersja BGR do RGB
+            im = Image.fromarray(im_array[..., ::-1])
             
             processed_filename = f"pred_{unique_filename}"
             processed_path = os.path.join(app.config['UPLOAD_FOLDER'], processed_filename)
             im.save(processed_path)
             processed_image = processed_filename
 
-            # Tworzenie listy wykrytych obiektów do wyświetlenia pod zdjęciem
             for box in result.boxes:
                 class_id = int(box.cls[0])
                 class_name = model.names[class_id]
@@ -72,10 +79,11 @@ def index():
                 
                 detections.append({
                     "name": class_name,
-                    "confidence": round(confidence * 100, 2)
+                    "class_id": class_id,
+                    "confidence": round(confidence * 100, 2),
+                    "box": box.xyxyn[0].tolist()
                 })
 
-    # KLUCZOWE: Przekazujemy 'categories' i 'all_classes' do HTML
     return render_template(
         "index.html", 
         uploaded_image=uploaded_image, 
