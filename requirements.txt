@@ -2,3 +2,4 @@ Flask
 Pillow
 ultralytics
 YOLO
+opencv-python

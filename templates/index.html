@@ -6,67 +6,100 @@
     <title>YOLO WebApp — Interaktywna Detekcja</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    <style>
-        .category-header { cursor: pointer; user-select: none; }
-        .category-header:hover { color: #ffc107 !important; }
-        .hidden-view { display: none; }
-        .table-dark { background-color: #212529; }
-        #classListContainer { scrollbar-width: thin; scrollbar-color: #ffc107 #212529; }
-        
-        /* Styl kontenera obrazu i ramek */
-        .detection-container {
-            position: relative;
-            display: inline-block;
-            width: 100%;
-            max-width: 800px;
-        }
-        .detection-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none; /* Pozwala klikać "przez" ramki */
-        }
-        .bbox {
-            position: absolute;
-            border: 2px solid #ffc107;
-            box-shadow: 0 0 5px rgba(0,0,0,0.5);
-        }
-        .bbox-label {
-            position: absolute;
-            top: -22px;
-            left: -2px;
-            background: #ffc107;
-            color: #000;
-            font-size: 10px;
-            font-weight: bold;
-            padding: 1px 4px;
-            white-space: nowrap;
-        }
-    </style>
 </head>
 
 <body class="bg-dark text-light">
 
+<div id="analyzingOverlay" class="analyzing-overlay d-none" aria-hidden="true">
+    <div class="analyzing-card">
+        <div class="d-flex align-items-center justify-content-between gap-3 mb-2">
+            <div class="fw-bold text-warning">Trwa analiza…</div>
+            <div class="spinner-border text-warning" role="status" aria-label="Ładowanie"></div>
+        </div>
+
+        <div class="text-secondary small mb-3">
+            Nie zamykaj karty. Przy filmach analiza może trochę potrwać.
+        </div>
+
+        <div class="analyzing-preview mb-3">
+            <img id="analyzingPreviewImg" class="d-none" alt="Podgląd pierwszej klatki">
+            <div id="analyzingPreviewEmpty" class="text-secondary small">Ładowanie podglądu…</div>
+        </div>
+
+        <div class="progress bg-dark">
+            <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width: 100%"></div>
+        </div>
+    </div>
+</div>
+
+<button id="historyFab" class="history-fab" type="button" aria-label="Otwórz historię">
+    ☰ <span class="history-fab-text">Historia</span>
+    <span class="history-fab-count">{{ history_count }}/{{ history_limit }}</span>
+</button>
+
 <div class="container py-5">
     <h1 class="text-center mb-4">Detekcja Obiektów YOLOv8</h1>
 
-    {% with messages = get_flashed_messages() %}
+    {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
-            {% for message in messages %}
-                <div class="alert alert-danger alert-dismissible fade show">
+            {% for category, message in messages %}
+                {% set cat = category if category in ['success','danger','warning','info','primary','secondary','light','dark'] else 'danger' %}
+                <div class="alert alert-{{ cat }} alert-dismissible fade show js-flash" role="alert">
                     {{ message }}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Zamknij"></button>
                 </div>
             {% endfor %}
         {% endif %}
     {% endwith %}
 
-    <form method="POST" enctype="multipart/form-data" class="card p-4 bg-secondary text-light shadow mb-5">
+    <div id="historySidebar" class="history-sidebar" aria-hidden="true">
+        <div class="history-sidebar-header">
+            <div class="text-warning fw-bold">Historia analiz <span class="badge bg-secondary ms-2">{{ history_count }}/{{ history_limit }}</span></div>
+            <button type="button" class="btn-close btn-close-white" id="closeHistoryBtn" aria-label="Zamknij"></button>
+        </div>
+        <div class="history-sidebar-body">
+            <div class="d-flex flex-wrap gap-3 align-items-end mb-3">
+                <form method="POST" class="d-flex gap-2 align-items-end">
+                    <input type="hidden" name="action" value="set_history_limit">
+                    <div>
+                        <label class="form-label text-secondary mb-1">Limit historii</label>
+                        <input type="number" class="form-control form-control-sm bg-dark text-white border-secondary"
+                               name="history_limit" min="1" max="500" value="{{ history_limit }}">
+                    </div>
+                    <button class="btn btn-sm btn-warning">Zapisz</button>
+                </form>
+
+                <form method="POST">
+                    <input type="hidden" name="action" value="clear_history">
+                    <button class="btn btn-sm btn-outline-danger">Wyczyść</button>
+                </form>
+            </div>
+
+            {% if history_runs %}
+                <div class="history-strip">
+                    {% for run in history_runs %}
+                        <a class="history-card" href="{{ url_for('main.index', run=run.id) }}" title="{{ run.created_at }}">
+                            <div class="history-thumb">
+                                <img src="{{ url_for('main.uploaded_file', filename=run.thumb) }}" alt="Miniatura analizy">
+                            </div>
+                            <div class="history-meta">
+                                <div class="history-time">{{ run.created_at }}</div>
+                                <div class="history-stats">{{ run.summary.total }} wykryć • {{ run.summary.num_classes }} klas</div>
+                            </div>
+                        </a>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="text-secondary">Brak zapisanych analiz.</div>
+            {% endif %}
+        </div>
+    </div>
+    <div id="historyBackdrop" class="history-backdrop" aria-hidden="true"></div>
+
+    <form id="analyzeForm" method="POST" enctype="multipart/form-data" class="card p-4 bg-secondary text-light shadow mb-5">
         <div class="mb-4">
-            <label class="form-label fw-bold text-warning">1. Wybierz zdjęcie:</label>
-            <input type="file" name="image" accept="image/*,video/*" class="form-control" required>
+            <label class="form-label fw-bold text-warning">1. Wybierz zdjęcie lub film:</label>
+            <input id="fileInput" type="file" name="image" accept="image/*,video/*" class="form-control" required>
         </div>
 
         <div class="mb-3">
@@ -79,8 +112,8 @@
             </div>
 
             <input type="text" id="classSearch" class="form-control form-control-sm mb-2 bg-dark text-white" placeholder="Szukaj klasy...">
-            
-            <div id="classListContainer" class="bg-dark p-3 rounded border border-secondary" style="max-height: 180px; overflow-y: auto;">
+
+            <div id="classListContainer" class="bg-dark p-3 rounded border border-secondary">
                 <div id="viewCategorized">
                     {% for cat_name, ids in categories.items() %}
                     <div class="category-group mb-3">
@@ -113,22 +146,23 @@
                 </div>
             </div>
         </div>
-        <button class="btn btn-warning btn-lg w-100 fw-bold">ANALIZUJ</button>
+
+        <button id="analyzeBtn" class="btn btn-warning btn-lg w-100 fw-bold" type="submit">ANALIZUJ</button>
     </form>
 
-    {% if uploaded_image %}
+    {% if media_type == 'image' and uploaded_image %}
     <div class="row mb-5">
         <div class="col-12 text-center">
             <h5 class="text-warning mb-3">Wynik Detekcji (Interaktywny)</h5>
             <div class="detection-container mx-auto">
-                <img src="{{ url_for('uploaded_file', filename=uploaded_image) }}" id="mainImage" class="img-fluid rounded border border-secondary">
+                <img src="{{ url_for('main.uploaded_file', filename=uploaded_image) }}" id="mainImage" class="img-fluid rounded border border-secondary">
                 <div id="detectionOverlay" class="detection-overlay"></div>
             </div>
         </div>
     </div>
 
     <div class="card bg-secondary p-4 shadow">
-        <div class="row align-items-center mb-4">
+        <div class="row align-items-center mb-3">
             <div class="col-md-6">
                 <h4 class="text-warning m-0">📋 Wykryte obiekty</h4>
             </div>
@@ -138,45 +172,314 @@
             </div>
         </div>
 
-        <div class="table-responsive">
-            <table class="table table-dark table-striped table-hover align-middle" id="resultsTable">
-                <thead>
-                    <tr>
-                        <th scope="col">#</th>
-                        <th scope="col">Nazwa obiektu</th>
-                        <th scope="col">Pewność</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in detections %}
-                    <tr class="detection-row" data-conf="{{ item.confidence }}">
-                        <th scope="row">{{ loop.index }}</th>
-                        <td class="text-capitalize fw-bold text-warning">{{ item.name }}</td>
-                        <td>
-                            <div class="progress bg-dark" style="height: 20px;">
-                                <div class="progress-bar bg-warning text-dark fw-bold" style="width: {{ item.confidence }}%;">
-                                    {{ item.confidence }}%
-                                </div>
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% if not detections %}
-                <div class="alert alert-info bg-dark text-info border-info">Brak wykrytych obiektów dla wybranych klas.</div>
-            {% endif %}
+        <div class="mb-4">
+            <input type="text" id="resultSearch" class="form-control bg-dark text-white" placeholder="Szukaj w wykrytych obiektach (np. person, pizza...)" autocomplete="off">
+            <div class="text-secondary small mt-1">Wykres kołowy i podsumowanie liczą się z tego, co aktualnie widać (pewność + wyszukiwanie).</div>
+        </div>
+
+        <div id="summaryPanel" class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="p-3 rounded bg-dark border border-secondary h-100">
+                    <div class="text-secondary small">Łącznie wykryć</div>
+                    <div class="fs-2 text-warning fw-bold" id="sumTotal">{{ summary.total }}</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="p-3 rounded bg-dark border border-secondary h-100">
+                    <div class="text-secondary small">Unikalnych klas</div>
+                    <div class="fs-2 text-warning fw-bold" id="sumClasses">{{ summary.num_classes }}</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="p-3 rounded bg-dark border border-secondary h-100">
+                    <div class="text-secondary small">Średnia pewność</div>
+                    <div class="fs-2 text-warning fw-bold" id="sumAvg">{{ summary.avg_conf }}%</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="p-3 rounded bg-dark border border-secondary h-100">
+                    <div class="text-secondary small">Najwyższa pewność</div>
+                    <div class="fs-2 text-warning fw-bold" id="sumMax">{{ summary.max_conf }}%</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-3">
+            <div class="col-lg-6">
+                <div class="table-responsive results-scroll bg-dark rounded border border-secondary p-2">
+                    <table class="table table-dark table-striped table-hover align-middle mb-0" id="resultsTable">
+                        <thead>
+                            <tr>
+                                <th scope="col">#</th>
+                                <th scope="col">Nazwa obiektu</th>
+                                <th scope="col">Pewność</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in detections %}
+                            <tr class="detection-row" data-conf="{{ item.confidence }}">
+                                <th scope="row">{{ loop.index }}</th>
+                                <td class="text-capitalize fw-bold text-warning">{{ item.name }}</td>
+                                <td>
+                                    <div class="progress bg-dark confidence-progress">
+                                        <div class="progress-bar bg-warning text-dark fw-bold" style="width: {{ item.confidence }}%;">
+                                            {{ item.confidence }}%
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div id="noVisibleRows" class="alert alert-info bg-dark text-info border-info mt-3 d-none">Brak wykryć dla aktualnych filtrów (pewność + wyszukiwanie).</div>
+            </div>
+
+            <div class="col-lg-6">
+                <div class="p-3 rounded bg-dark border border-secondary chart-box">
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <div class="text-warning fw-bold">Wykres kołowy klas</div>
+                    </div>
+                    <canvas id="classPie"></canvas>
+                    <div id="classPieEmpty" class="alert alert-info bg-dark text-info border-info mt-3 mb-0 d-none">Brak danych do wykresu.</div>
+                </div>
+            </div>
         </div>
     </div>
     {% endif %}
+
+    {% if media_type == 'video' and processed_video %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+            <h5 class="text-warning m-0">Wynik Detekcji (Wideo)</h5>
+            <a class="btn btn-sm btn-warning" href="{{ url_for('main.download_file', filename=processed_video) }}">Pobierz wynik</a>
+        </div>
+
+        {% if video_thumb %}
+        <div class="p-3 rounded bg-dark border border-secondary">
+            <img src="{{ url_for('main.uploaded_file', filename=video_thumb) }}" class="img-fluid rounded border border-secondary" alt="Miniatura wideo">
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card bg-secondary p-4 shadow">
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="p-3 rounded bg-dark border border-secondary h-100">
+                <div class="text-secondary small">Łącznie wykryć</div>
+                <div class="fs-2 text-warning fw-bold">{{ summary.total }}</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="p-3 rounded bg-dark border border-secondary h-100">
+                <div class="text-secondary small">Unikalnych klas</div>
+                <div class="fs-2 text-warning fw-bold">{{ summary.num_classes }}</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="p-3 rounded bg-dark border border-secondary h-100">
+                <div class="text-secondary small">Średnia pewność</div>
+                <div class="fs-2 text-warning fw-bold">{{ summary.avg_conf }}%</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="p-3 rounded bg-dark border border-secondary h-100">
+                <div class="text-secondary small">Najwyższa pewność</div>
+                <div class="fs-2 text-warning fw-bold">{{ summary.max_conf }}%</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <div class="table-responsive results-scroll bg-dark rounded border border-secondary p-2">
+                <table class="table table-dark table-striped table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th scope="col">#</th>
+                            <th scope="col">Klasa</th>
+                            <th scope="col">Ilość</th>
+                            <th scope="col">Avg</th>
+                            <th scope="col">Max</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in video_rows %}
+                        <tr>
+                            <th scope="row">{{ loop.index }}</th>
+                            <td class="text-capitalize fw-bold text-warning">{{ r.name }}</td>
+                            <td class="fw-bold">{{ r.count }}</td>
+                            <td>{{ r.avg_conf }}%</td>
+                            <td>{{ r.max_conf }}%</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="p-3 rounded bg-dark border border-secondary chart-box">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <div class="text-warning fw-bold">Wykres kołowy klas</div>
+                </div>
+                <canvas id="classPie"></canvas>
+                <div id="classPieEmpty" class="alert alert-info bg-dark text-info border-info mt-3 mb-0 d-none">Brak danych do wykresu.</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script>
-    // Dane przesłane z backendu
-    const detections = {{ detections|tojson if detections else '[]' }};
 
-    // 1. Zarządzanie widokiem klas (Kategorie / Alfabet)
+<script>
+  window.addEventListener('load', () => {
+    document.querySelectorAll('.js-flash').forEach((el) => {
+      setTimeout(() => {
+        const alert = bootstrap.Alert.getOrCreateInstance(el);
+        alert.close();
+      }, 3000);
+    });
+  });
+</script>
+
+<script>
+(() => {
+  const sidebar = document.getElementById('historySidebar');
+  const backdrop = document.getElementById('historyBackdrop');
+  const openBtn = document.getElementById('historyFab');
+  const closeBtn = document.getElementById('closeHistoryBtn');
+
+  if (!sidebar || !backdrop || !openBtn || !closeBtn) return;
+
+  const open = () => {
+    sidebar.classList.add('open');
+    backdrop.classList.add('show');
+    sidebar.setAttribute('aria-hidden', 'false');
+    backdrop.setAttribute('aria-hidden', 'false');
+    openBtn.style.display = 'none';
+  };
+
+  const close = () => {
+    sidebar.classList.remove('open');
+    backdrop.classList.remove('show');
+    sidebar.setAttribute('aria-hidden', 'true');
+    backdrop.setAttribute('aria-hidden', 'true');
+    openBtn.style.display = '';
+  };
+
+  openBtn.addEventListener('click', open);
+  closeBtn.addEventListener('click', close);
+  backdrop.addEventListener('click', close);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+})();
+</script>
+
+<script>
+(() => {
+  const form = document.getElementById('analyzeForm');
+  const fileInput = document.getElementById('fileInput');
+  const overlay = document.getElementById('analyzingOverlay');
+  const img = document.getElementById('analyzingPreviewImg');
+  const empty = document.getElementById('analyzingPreviewEmpty');
+  const historyFab = document.getElementById('historyFab');
+
+  if (!form || !fileInput || !overlay || !img || !empty) return;
+
+  const showOverlay = () => {
+    overlay.classList.remove('d-none');
+    overlay.setAttribute('aria-hidden', 'false');
+    if (historyFab) historyFab.style.display = 'none';
+    document.title = 'Trwa analiza… | YOLO WebApp';
+  };
+
+  const setPreviewImage = (dataUrl) => {
+    img.src = dataUrl;
+    img.classList.remove('d-none');
+    empty.classList.add('d-none');
+  };
+
+  const setPreviewError = () => {
+    img.classList.add('d-none');
+    empty.textContent = 'Nie udało się wczytać podglądu.';
+    empty.classList.remove('d-none');
+  };
+
+  const previewFirstFrame = (file) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+    video.src = url;
+
+    const cleanup = () => {
+      URL.revokeObjectURL(url);
+    };
+
+    video.addEventListener('loadeddata', () => {
+      try {
+        video.currentTime = 0;
+      } catch {
+        setPreviewError();
+        cleanup();
+      }
+    });
+
+    video.addEventListener('seeked', () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 360;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        setPreviewImage(canvas.toDataURL('image/jpeg', 0.85));
+      } catch {
+        setPreviewError();
+      } finally {
+        cleanup();
+      }
+    });
+
+    video.addEventListener('error', () => {
+      setPreviewError();
+      cleanup();
+    });
+  };
+
+  const previewImage = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => setPreviewImage(reader.result);
+    reader.onerror = setPreviewError;
+    reader.readAsDataURL(file);
+  };
+
+  form.addEventListener('submit', () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+
+    showOverlay();
+
+    const isVideo = (file.type || '').startsWith('video/');
+    if (isVideo) previewFirstFrame(file);
+    else previewImage(file);
+  });
+})();
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<script>
+    const mediaType = {{ (media_type or '')|tojson }};
+    const detections = {{ detections|tojson if detections else '[]' }};
+    const videoRows = {{ video_rows|tojson if video_rows else '[]' }};
+
     function switchView(mode) {
         document.getElementById('viewCategorized').classList.toggle('hidden-view', mode !== 'cat');
         document.getElementById('viewAlphabetical').classList.toggle('hidden-view', mode !== 'alpha');
@@ -189,84 +492,200 @@
     }
 
     function toggleCategory(cat) {
-        const checks = document.querySelector(`.category-items[data-cat="${cat}"]`).querySelectorAll('.sync-check');
+        const group = document.querySelector(`.category-items[data-cat="${cat}"]`);
+        if (!group) return;
+        const checks = group.querySelectorAll('.sync-check');
         const allChecked = Array.from(checks).every(c => c.checked);
         checks.forEach(c => { c.checked = !allChecked; syncCheckboxes(c); });
     }
 
-    // 2. Generowanie kolorów na podstawie ID klasy (Golden Angle)
     function getColor(classId) {
-        const hue = (classId * 137.5) % 360; // Zapewnia rozpiętość barw
+        const hue = (classId * 137.5) % 360;
         return `hsl(${hue}, 75%, 50%)`;
     }
 
-    // 3. Dynamiczne filtrowanie i renderowanie
-    const slider = document.getElementById('confSlider');
-    const confLabel = document.getElementById('confVal');
-    const overlay = document.getElementById('detectionOverlay');
-    const rows = document.querySelectorAll('.detection-row');
+    const pieCanvas = document.getElementById('classPie');
+    const pieEmpty = document.getElementById('classPieEmpty');
+    let classPieChart = null;
 
-    function updateFilters() {
-        if (!slider) return;
-        
-        const minConf = parseInt(slider.value);
-        confLabel.innerText = minConf;
-        overlay.innerHTML = ''; // Czyścimy stare ramki
+    function updateClassPieChartFromPairs(pairs) {
+        if (!pieCanvas || typeof Chart === 'undefined') return;
 
-        detections.forEach((det, index) => {
-            const isVisible = det.confidence >= minConf;
-            const color = getColor(det.class_id);
-            
-            // Filtrowanie i kolorowanie tabeli
-            if(rows[index]) {
-                rows[index].style.display = isVisible ? '' : 'none';
-                // Kolorujemy tekst nazwy i pasek postępu pod kolor ramki
-                rows[index].querySelector('.text-warning').style.color = color;
-                rows[index].querySelector('.progress-bar').style.backgroundColor = color;
+        const entries = pairs.slice().sort((a, b) => b.count - a.count);
+        const TOP_N = 8;
 
-                // Interakcja: Podświetlanie po najechaniu na wiersz
-                rows[index].onmouseenter = () => {
-                    const box = document.getElementById(`bbox-${index}`);
-                    if(box) box.style.boxShadow = `0 0 15px ${color}, 0 0 5px white`;
-                };
-                rows[index].onmouseleave = () => {
-                    const box = document.getElementById(`bbox-${index}`);
-                    if(box) box.style.boxShadow = '0 0 5px rgba(0,0,0,0.5)';
-                };
-            }
+        let labels = [];
+        let data = [];
+        let colors = [];
+        let other = 0;
 
-            // Rysowanie ramek
-            if(isVisible && det.box) {
-                const [x1, y1, x2, y2] = det.box;
-                const bbox = document.createElement('div');
-                bbox.className = 'bbox';
-                bbox.id = `bbox-${index}`;
-                bbox.style.borderColor = color;
-                bbox.style.left = (x1 * 100) + '%';
-                bbox.style.top = (y1 * 100) + '%';
-                bbox.style.width = ((x2 - x1) * 100) + '%';
-                bbox.style.height = ((y2 - y1) * 100) + '%';
-                
-                bbox.innerHTML = `<div class="bbox-label" style="background-color: ${color};">${det.name} ${det.confidence}%</div>`;
-                overlay.appendChild(bbox);
+        entries.forEach((it, idx) => {
+            if (idx < TOP_N) {
+                labels.push(it.name);
+                data.push(it.count);
+                colors.push(getColor(it.class_id ?? idx));
+            } else {
+                other += it.count;
             }
         });
+
+        if (other > 0) {
+            labels.push('Inne');
+            data.push(other);
+            colors.push('#6c757d');
+        }
+
+        const hasData = data.length > 0;
+        if (pieEmpty) pieEmpty.classList.toggle('d-none', hasData);
+
+        if (!hasData) {
+            labels = ['Brak danych'];
+            data = [1];
+            colors = ['#6c757d'];
+        }
+
+        const config = {
+            type: 'pie',
+            data: {
+                labels,
+                datasets: [{
+                    data,
+                    backgroundColor: colors,
+                    borderColor: '#212529',
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        align: 'start',
+                        labels: { color: '#f8f9fa', boxWidth: 14, boxHeight: 14, padding: 12 }
+                    }
+                }
+            }
+        };
+
+        if (!classPieChart) {
+            classPieChart = new Chart(pieCanvas, config);
+        } else {
+            classPieChart.data.labels = labels;
+            classPieChart.data.datasets[0].data = data;
+            classPieChart.data.datasets[0].backgroundColor = colors;
+            classPieChart.update();
+        }
     }
 
-    // Event Listenery
-    if(slider) {
-        slider.addEventListener('input', updateFilters);
+    if (mediaType === "video") {
+        updateClassPieChartFromPairs(videoRows.map(r => ({ name: r.name, count: r.count, class_id: r.class_id })));
+    } else if (mediaType === "image") {
+        const slider = document.getElementById('confSlider');
+        const confLabel = document.getElementById('confVal');
+        const overlay = document.getElementById('detectionOverlay');
+        const rows = document.querySelectorAll('.detection-row');
+        const resultSearch = document.getElementById('resultSearch');
+        const noVisibleRows = document.getElementById('noVisibleRows');
+
+        const sumTotal = document.getElementById('sumTotal');
+        const sumClasses = document.getElementById('sumClasses');
+        const sumAvg = document.getElementById('sumAvg');
+        const sumMax = document.getElementById('sumMax');
+
+        function updateSummary(visibleDetections) {
+            const total = visibleDetections.length;
+            const confs = visibleDetections.map(d => d.confidence);
+
+            if (sumTotal) sumTotal.textContent = total;
+            if (sumClasses) sumClasses.textContent = new Set(visibleDetections.map(d => d.class_id)).size;
+
+            const avg = total ? (confs.reduce((a, b) => a + b, 0) / total) : 0;
+            const mx = total ? Math.max(...confs) : 0;
+
+            if (sumAvg) sumAvg.textContent = `${avg.toFixed(2)}%`;
+            if (sumMax) sumMax.textContent = `${mx.toFixed(2)}%`;
+
+            if (noVisibleRows) noVisibleRows.classList.toggle('d-none', total !== 0);
+        }
+
+        function updateFilters() {
+            if (!slider) return;
+
+            const minConf = parseInt(slider.value);
+            if (confLabel) confLabel.innerText = minConf;
+            if (overlay) overlay.innerHTML = '';
+
+            const term = (resultSearch?.value || '').trim().toLowerCase();
+
+            const classCount = new Map();
+            const classIdMap = new Map();
+            const visibleDetections = [];
+
+            detections.forEach((det, index) => {
+                const matchesTerm = !term || (det.name || '').toLowerCase().includes(term);
+                const isVisible = (det.confidence >= minConf) && matchesTerm;
+
+                if (rows[index]) {
+                    rows[index].style.display = isVisible ? '' : 'none';
+
+                    const color = getColor(det.class_id);
+                    const nameCell = rows[index].querySelector('td.text-warning');
+                    const bar = rows[index].querySelector('.progress-bar');
+                    if (nameCell) nameCell.style.color = color;
+                    if (bar) bar.style.backgroundColor = color;
+
+                    rows[index].onmouseenter = () => {
+                        const box = document.getElementById(`bbox-${index}`);
+                        if (box) box.style.boxShadow = `0 0 15px ${color}, 0 0 5px white`;
+                    };
+                    rows[index].onmouseleave = () => {
+                        const box = document.getElementById(`bbox-${index}`);
+                        if (box) box.style.boxShadow = '0 0 5px rgba(0,0,0,0.5)';
+                    };
+                }
+
+                if (isVisible) {
+                    visibleDetections.push(det);
+                    classCount.set(det.name, (classCount.get(det.name) || 0) + 1);
+                    if (!classIdMap.has(det.name)) classIdMap.set(det.name, det.class_id);
+
+                    if (overlay && det.box) {
+                        const [x1, y1, x2, y2] = det.box;
+                        const color = getColor(det.class_id);
+
+                        const bbox = document.createElement('div');
+                        bbox.className = 'bbox';
+                        bbox.id = `bbox-${index}`;
+                        bbox.style.borderColor = color;
+                        bbox.style.left = (x1 * 100) + '%';
+                        bbox.style.top = (y1 * 100) + '%';
+                        bbox.style.width = ((x2 - x1) * 100) + '%';
+                        bbox.style.height = ((y2 - y1) * 100) + '%';
+                        bbox.innerHTML = `<div class="bbox-label" style="background-color: ${color};">${det.name} ${det.confidence}%</div>`;
+                        overlay.appendChild(bbox);
+                    }
+                }
+            });
+
+            updateSummary(visibleDetections);
+
+            const pairs = Array.from(classCount.entries()).map(([name, count]) => ({ name, count, class_id: classIdMap.get(name) }));
+            updateClassPieChartFromPairs(pairs);
+        }
+
+        if (slider) slider.addEventListener('input', updateFilters);
+        if (resultSearch) resultSearch.addEventListener('input', updateFilters);
+
         window.addEventListener('load', updateFilters);
-        window.addEventListener('resize', updateFilters);
     }
 
-    // Wyszukiwarka klas
-    const searchInput = document.getElementById('classSearch');
-    if(searchInput) {
-        searchInput.addEventListener('input', function() {
-            let f = this.value.toLowerCase();
+    const classSearch = document.getElementById('classSearch');
+    if (classSearch) {
+        classSearch.addEventListener('input', function() {
+            const f = this.value.toLowerCase();
             document.querySelectorAll('.class-item').forEach(i => {
-                i.style.display = i.getAttribute('data-name').toLowerCase().includes(f) ? "block" : "none";
+                i.style.display = i.getAttribute('data-name').toLowerCase().includes(f) ? 'block' : 'none';
             });
         });
     }
