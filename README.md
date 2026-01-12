@@ -6,17 +6,26 @@ Aplikacja pozwala na analizę wysłanego pliku w odpowiednim formacie, a po anal
 
 ---
 
+  ## Szczegółowa dokumentacja 
+- [Opis aplikacji](docs/overview.md)
+- [Instalacja](docs/installation.md)
+- [Developer Guide](docs/developer_guide.md)
+- [Instrukcja użytkowania](docs/user_guide.md)
+- [API Reference](docs/api.md)
+  
+---
+
 ## Wymagania
 
 - Python 3.10+ (zalecane)
 - Pakiety z `requirements.txt`
-- Plik modelu: `yolov8n.pt` (jest w projekcie)
+- Plik modelu: `yolov8n.pt` (w projekcie)
 
 ---
 
 ## Instalacja
 
-1) (Opcjonalnie) utwórz środowisko wirtualne:
+1) Środowisko wirtualne:
 
 **Windows (PowerShell):**
 ```powershell
